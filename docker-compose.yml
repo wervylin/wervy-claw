@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    image: jd-analyzer:latest
+    container_name: jd-analyzer-app
+    ports:
+      - "5000:5000"
+    environment:
+      # 必需：Kimi API Key
+      - KIMI_API_KEY=${KIMI_API_KEY}
+      - KIMI_BASE_URL=https://api.moonshot.cn/v1
+      
+      # 可选：Brave Search API（用于联网搜索）
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      
+      # 项目配置
+      - COZE_WORKSPACE_PATH=/app
+      - COZE_PROJECT_TYPE=agent
+      - LOG_LEVEL=INFO
+      
+      # 可选：PostgreSQL 数据库（如果不配置则使用内存存储）
+      - PGDATABASE_URL=${PGDATABASE_URL:-}
+    volumes:
+      - ./logs:/tmp/work/logs
+    restart: always
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - jd-analyzer-network
+
+  # 可选：PostgreSQL 数据库
+  # 如果不启用，应用会自动使用内存存储
+  db:
+    image: postgres:15-alpine
+    container_name: jd-analyzer-db
+    environment:
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-app_password}
+      - POSTGRES_DB=jd_analyzer
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d jd_analyzer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - jd-analyzer-network
+    # 如果不使用数据库，注释掉整个 db 服务
+
+  # 可选：Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: jd-analyzer-redis
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - jd-analyzer-network
+    # 如果不使用 Redis，注释掉整个 redis 服务
+
+  # 可选：Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: jd-analyzer-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    restart: always
+    networks:
+      - jd-analyzer-network
+    # 如果不使用 Nginx，注释掉整个 nginx 服务
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  jd-analyzer-network:
+    driver: bridge
